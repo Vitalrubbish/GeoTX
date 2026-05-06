@@ -163,12 +163,7 @@ graph LR
     style V3_LOSS fill:#2ecc71,color:#fff
 ```
 
-## Quick Testing
-
-```bash
-# GeoTX v0.3 (full model) evaluation
-python scripts/eval_lora.py --dataset streetview_pano --checkpoint geoclip/model/weights/neg_sampling_weights.pth
-```
+## Testing
 
 See `docs/dev/test.md` for the complete training and evaluation runbook for all three versions.
 
@@ -212,8 +207,6 @@ All models are evaluated with Great-Circle Distance accuracy at five thresholds:
 | 200 km | Regional recognition |
 | 750 km | Country/state level |
 | 2500 km | Continental level |
-
-For street-view geo-localization, improvements at **1 km** and **25 km** are the primary targets, as coarse-level performance (200+ km) is already strong from the pre-trained GeoCLIP backbone.
 
 ## Acknowledgments
 

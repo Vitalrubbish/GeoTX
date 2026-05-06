@@ -13,4 +13,4 @@ __pycache__
 .json
 scripts/convert_streetview_pano_dataset.py
 scripts/sample_streetview_subset.py
-.vscode
+.vscodegeoclip/model/weights/neg_sampling_weights.pth

@@ -1,8 +1,4 @@
 # Testing Document
-## Quick Testing
-```bash
-python scripts/eval_lora.py --dataset streetview_pano --checkpoint geoclip/model/weights/neg_sampling_weights.pth
-```
 
 ## All-Set Training And Testing
 1. Initial Model: GeoCLIP
