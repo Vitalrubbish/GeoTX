@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Train GeoCLIP with LoRA on the image encoder following the LoRA.md specification.
+"""Train GeoCLIP with LoRA + SigmaSelector + Optimized Negative Sampling.
 
-Freezing strategy:
+Extends the LoRA training baseline with geographic distance-based negative
+sample filtering. Two strategies are supported:
+
+  threshold  Exclude negatives whose distance to the anchor is < H km.
+  topk       Keep only the K furthest negatives per anchor.
+
+Freezing strategy (same as LoRA baseline):
   - Frozen: CLIP ViT backbone, LocationEncoder backbone
   - Trainable: LoRA adapters (q_proj/v_proj), image MLP, SigmaSelector,
                LocationEncoderCapsule heads
-
-Differential learning rates:
-  - 1e-4 for LoRA + image MLP
-  - 5e-5 for SigmaSelector + LocationEncoder capsule heads
 """
 
 from __future__ import annotations
@@ -24,11 +26,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from geoclip import GeoCLIP
+from geoclip.model.GeoCLIP import negative_sample_mask
 from geoclip.train.dataloader import GeoDataLoader, img_train_transform, img_val_transform
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train GeoCLIP with LoRA on image encoder")
+    parser = argparse.ArgumentParser(
+        description="Train GeoCLIP with LoRA + SigmaSelector + Negative Sampling"
+    )
     parser.add_argument("--mode", choices=["feasibility", "full"], default="feasibility")
     parser.add_argument("--train-csv", type=Path, default=None)
     parser.add_argument("--val-csv", type=Path, default=None)
@@ -47,7 +52,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/lora"))
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/negative_sampling"))
+
+    neg = parser.add_argument_group("Negative Sampling")
+    neg.add_argument("--neg-strategy", choices=["threshold", "topk"], default="threshold")
+    neg.add_argument("--neg-threshold", type=float, default=200.0,
+                     help="Distance threshold in km for 'threshold' strategy (default: 200)")
+    neg.add_argument("--neg-topk", type=int, default=None,
+                     help="Number of furthest negatives to keep for 'topk' strategy")
     return parser.parse_args()
 
 
@@ -89,33 +101,27 @@ def freeze_for_lora_training(model: GeoCLIP):
 
     Returns parameter groups for differential learning rates.
     """
-    # Step 1: Freeze everything
     for param in model.parameters():
         param.requires_grad = False
 
-    # Step 2: Unfreeze LoRA adapters (identified by "lora_" in parameter name)
     lora_params: list[nn.Parameter] = []
     for name, param in model.named_parameters():
         if "lora_" in name:
             param.requires_grad = True
             lora_params.append(param)
 
-    # Step 3: Unfreeze image MLP
     mlp_params: list[nn.Parameter] = []
     for param in model.image_encoder.mlp.parameters():
         param.requires_grad = True
         mlp_params.append(param)
 
-    # Step 4: Unfreeze SigmaSelector
     if not hasattr(model.location_encoder, "sigma_selector"):
-        raise RuntimeError("SigmaSelector is required for LoRA training. "
-                           "Ensure use_sigma_selector=True")
+        raise RuntimeError("SigmaSelector is required. Ensure use_sigma_selector=True")
     selector_params: list[nn.Parameter] = []
     for param in model.location_encoder.sigma_selector.parameters():
         param.requires_grad = True
         selector_params.append(param)
 
-    # Step 5: Unfreeze LocationEncoderCapsule heads (the tail layer)
     head_params: list[nn.Parameter] = []
     for i in range(model.location_encoder.n):
         capsule = model.location_encoder._modules[f"LocEnc{i}"]
@@ -132,6 +138,9 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     criterion: nn.Module,
     device: str,
+    neg_strategy: str = "threshold",
+    neg_threshold: float = 200.0,
+    neg_topk: int | None = None,
 ) -> float:
     model.train()
     running_loss = 0.0
@@ -150,14 +159,19 @@ def train_one_epoch(
 
         gps_queue = model.get_gps_queue()
         gps_all = torch.cat([gps, gps_queue], dim=0)
-        model.dequeue_and_enqueue(gps)
 
         logits_img_gps = model(images, gps_all)
+
+        mask = negative_sample_mask(gps_all, batch_size, neg_strategy, neg_threshold, neg_topk)
+        logits_img_gps[mask] = -float("inf")
+
         targets = torch.arange(batch_size, device=device, dtype=torch.long)
         loss = criterion(logits_img_gps, targets)
 
         loss.backward()
         optimizer.step()
+
+        model.dequeue_and_enqueue(gps)
 
         running_loss += loss.item() * batch_size
         running_count += batch_size
@@ -217,7 +231,7 @@ def maybe_plot_curves(output_dir: Path, train_losses: list[float], val_losses: l
     plt.plot(epochs, val_losses, label="val_loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.title("LoRA Training Curve")
+    plt.title("Negative Sampling Training Curve")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -290,7 +304,7 @@ def main() -> int:
     )
     criterion = nn.CrossEntropyLoss()
 
-    run_name = f"{args.mode}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    run_name = f"{args.mode}_{args.neg_strategy}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     run_dir = args.output_dir / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -308,6 +322,7 @@ def main() -> int:
     print(f"Val CSV: {val_csv} ({len(val_dataset)} samples)")
     print(f"Run dir: {run_dir}")
     print(f"LoRA config: r={args.lora_r}, alpha={args.lora_alpha}, dropout={args.lora_dropout}")
+    print(f"Negative sampling: strategy={args.neg_strategy}, threshold={args.neg_threshold}, topk={args.neg_topk}")
     print(f"Trainable parameters:")
     print(f"  LoRA adapters: {lora_param_count:,}")
     print(f"  Image MLP:     {mlp_param_count:,}")
@@ -317,7 +332,12 @@ def main() -> int:
     print(f"Learning rates: LoRA/MLP={args.lora_lr}, Location={args.location_lr}")
 
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+        train_loss = train_one_epoch(
+            model, train_loader, optimizer, criterion, device,
+            neg_strategy=args.neg_strategy,
+            neg_threshold=args.neg_threshold,
+            neg_topk=args.neg_topk,
+        )
         val_loss = validate_one_epoch(model, val_loader, criterion, device)
 
         train_losses.append(float(train_loss))
@@ -336,14 +356,19 @@ def main() -> int:
                 "alpha": args.lora_alpha,
                 "dropout": args.lora_dropout,
             },
+            "neg_config": {
+                "strategy": args.neg_strategy,
+                "threshold": args.neg_threshold,
+                "topk": args.neg_topk,
+            },
         }
 
-        latest_ckpt = run_dir / "lora_latest.pth"
+        latest_ckpt = run_dir / "neg_sampling_latest.pth"
         torch.save(checkpoint, latest_ckpt)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_ckpt = run_dir / "lora_best.pth"
+            best_ckpt = run_dir / "neg_sampling_best.pth"
             torch.save(checkpoint, best_ckpt)
 
     fig_path = maybe_plot_curves(run_dir, train_losses, val_losses)
@@ -366,6 +391,9 @@ def main() -> int:
         "location_lr": args.location_lr,
         "weight_decay": args.weight_decay,
         "queue_size": args.queue_size,
+        "neg_strategy": args.neg_strategy,
+        "neg_threshold": args.neg_threshold,
+        "neg_topk": args.neg_topk,
         "trainable_params": {
             "lora": lora_param_count,
             "mlp": mlp_param_count,
@@ -378,8 +406,8 @@ def main() -> int:
         "best_val_loss": float(best_val_loss),
         "loss_curve": str(fig_path) if fig_path is not None else None,
         "checkpoints": {
-            "latest": str(run_dir / "lora_latest.pth"),
-            "best": str(run_dir / "lora_best.pth"),
+            "latest": str(run_dir / "neg_sampling_latest.pth"),
+            "best": str(run_dir / "neg_sampling_best.pth"),
         },
     }
 
@@ -387,8 +415,8 @@ def main() -> int:
     log_path.write_text(json.dumps(log_payload, indent=2), encoding="utf-8")
 
     print(f"Saved log: {log_path}")
-    print(f"Saved best checkpoint: {run_dir / 'lora_best.pth'}")
-    print(f"Saved latest checkpoint: {run_dir / 'lora_latest.pth'}")
+    print(f"Saved best checkpoint: {run_dir / 'neg_sampling_best.pth'}")
+    print(f"Saved latest checkpoint: {run_dir / 'neg_sampling_latest.pth'}")
     if fig_path is not None:
         print(f"Saved loss curve: {fig_path}")
 

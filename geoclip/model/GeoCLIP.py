@@ -10,6 +10,71 @@ from .misc import load_gps_data, file_dir
 from PIL import Image
 from torchvision.transforms import ToPILImage
 
+
+def haversine_distance(gps_a, gps_b):
+    """Compute pairwise haversine distance (km) between two sets of GPS coordinates.
+
+    Args:
+        gps_a (torch.Tensor): GPS tensor of shape (N, 2) in (lat, lon) degrees
+        gps_b (torch.Tensor): GPS tensor of shape (M, 2) in (lat, lon) degrees
+
+    Returns:
+        torch.Tensor: Distance matrix of shape (N, M) in kilometers
+    """
+    R = 6371.0
+    lat_a = torch.deg2rad(gps_a[:, 0:1])
+    lon_a = torch.deg2rad(gps_a[:, 1:2])
+    lat_b = torch.deg2rad(gps_b[:, 0:1])
+    lon_b = torch.deg2rad(gps_b[:, 1:2])
+
+    dlat = lat_a - lat_b.t()
+    dlon = lon_a - lon_b.t()
+
+    a = torch.sin(dlat / 2) ** 2 + torch.cos(lat_a) * torch.cos(lat_b.t()) * torch.sin(dlon / 2) ** 2
+    c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
+    return R * c
+
+
+def negative_sample_mask(gps_all, batch_size, neg_strategy, neg_threshold=200.0, neg_topk=None):
+    """Build a boolean mask to exclude geographically close negatives.
+
+    Args:
+        gps_all (torch.Tensor): All GPS candidates of shape (N, 2) where N = batch_size + queue_size.
+                                First batch_size entries are the positive anchors (and in-batch negatives).
+        batch_size (int): Number of images/GPS in the current mini-batch.
+        neg_strategy (str): "threshold" or "topk".
+        neg_threshold (float): Distance threshold in km for "threshold" strategy.
+        neg_topk (int | None): Number of furthest negatives to keep for "topk" strategy.
+
+    Returns:
+        torch.Tensor: Boolean mask of shape (batch_size, N). True means "exclude this negative"
+                      (set logit to -inf). Diagonal entries (positive pairs) are always False.
+    """
+    N = gps_all.shape[0]
+    device = gps_all.device
+
+    if neg_strategy == "threshold":
+        distances = haversine_distance(gps_all[:batch_size], gps_all)
+        mask = distances < neg_threshold
+        mask[torch.arange(batch_size, device=device), torch.arange(batch_size, device=device)] = False
+
+    elif neg_strategy == "topk":
+        if neg_topk is None or neg_topk >= N - 1:
+            return torch.zeros(batch_size, N, dtype=torch.bool, device=device)
+        distances = haversine_distance(gps_all[:batch_size], gps_all)
+        mask = torch.ones(batch_size, N, dtype=torch.bool, device=device)
+        mask[torch.arange(batch_size, device=device), torch.arange(batch_size, device=device)] = False
+
+        sorted_indices = torch.argsort(distances, dim=1, descending=True)
+        keep_indices = sorted_indices[:, :neg_topk]
+        for i in range(batch_size):
+            mask[i, keep_indices[i]] = False
+
+    else:
+        raise ValueError(f"Unknown neg_strategy: {neg_strategy}")
+
+    return mask
+
 class GeoCLIP(nn.Module):
     def __init__(self, from_pretrained=True, queue_size=4096, use_sigma_selector=False,
                  use_lora=False, lora_r=8, lora_alpha=16, lora_dropout=0.05):
