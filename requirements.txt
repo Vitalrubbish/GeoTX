@@ -7,3 +7,8 @@ numpy
 geopy
 pyarrow
 matplotlib
+peft
+scipy
+ipywidgets
+cartopy
+jupyter

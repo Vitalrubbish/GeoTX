@@ -79,6 +79,20 @@ class LocationEncoder(nn.Module):
         state_dict = torch.load(f"{file_dir}/weights/location_encoder_weights.pth")
         self.load_state_dict(state_dict, strict=not self.use_sigma_selector)
 
+    def get_sigma_weights(self, location):
+        """Return SigmaSelector routing weights for interpretability.
+
+        Args:
+            location (torch.Tensor): GPS tensor of shape (B, 2)
+
+        Returns:
+            torch.Tensor: Routing weights of shape (B, n)
+        """
+        if not self.use_sigma_selector:
+            raise RuntimeError("SigmaSelector is not enabled. Set use_sigma_selector=True.")
+        location = equal_earth_projection(location)
+        return self.sigma_selector(location)
+
     def forward(self, location):
         location = equal_earth_projection(location)
 
@@ -94,5 +108,5 @@ class LocationEncoder(nn.Module):
             location_features = torch.zeros(location.shape[0], 512).to(location.device)
             for feature in branch_features:
                 location_features += feature
-        
+
         return location_features
