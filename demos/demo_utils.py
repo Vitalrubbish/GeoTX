@@ -10,14 +10,15 @@ import torch
 import pandas as pd
 from PIL import Image
 from geopy.distance import geodesic as GD
+from tqdm import tqdm
 
 # Ensure project root is on sys.path for geoclip imports
 _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from geoclip import GeoCLIP
-from geoclip.train.dataloader import img_val_transform
+# GeoCLIP and img_val_transform are imported lazily inside functions
+# to avoid paying the transformers import cost at module load time.
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 WEIGHTS_DIR = _project_root / "geoclip" / "model" / "weights"
@@ -31,33 +32,61 @@ SIGMA_CKPT = _project_root / "outputs" / "sigma_selector" / "full_20260427T12212
 NEG_SAMPLING_CKPT = _project_root / "outputs" / "negative_sampling" / "full_threshold_20260506T053749Z" / "neg_sampling_best.pth"
 
 
-def load_geotx_model(device: str | None = None) -> GeoCLIP:
+def load_geotx_model(device: str | None = None):
     """Load GeoTX model with LoRA + SigmaSelector + Negative Sampling weights.
 
     Uses the negative-sampling checkpoint (which includes LoRA + SigmaSelector
-    weights from prior training stages).
+    weights from prior training stages). Skips HuggingFace CLIP download by
+    passing ``from_pretrained=False`` — all weights come from the checkpoint.
     """
+    from geoclip import GeoCLIP  # lazy import — transformers is heavy
+
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    steps = [
+        "Load checkpoint file",
+        "Build model (CLIP from config, no HF download)",
+        "Load checkpoint weights into model",
+        "Move model to device",
+        "Move GPS gallery to device",
+    ]
+    pbar = tqdm(total=len(steps), desc="Loading GeoCLIP", unit="step")
+
+    pbar.set_postfix_str(steps[0])
     checkpoint = torch.load(NEG_SAMPLING_CKPT, map_location="cpu")
     queue_size = _infer_queue_size(checkpoint)
     lora_cfg = checkpoint.get("lora_config", {})
+    pbar.update(1)
 
+    pbar.set_postfix_str(steps[1])
     model = GeoCLIP(
-        from_pretrained=True,
+        from_pretrained=False,
         queue_size=queue_size,
         use_sigma_selector=True,
         use_lora=True,
         lora_r=lora_cfg.get("r", 4),
         lora_alpha=lora_cfg.get("alpha", 8),
         lora_dropout=lora_cfg.get("dropout", 0.05),
-    ).to(device)
-    model.gps_gallery = model.gps_gallery.to(device)
+    )
+    pbar.update(1)
 
+    pbar.set_postfix_str(steps[2])
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     model.load_state_dict(state_dict, strict=False)
     model.eval()
+    pbar.update(1)
+
+    pbar.set_postfix_str(steps[3])
+    model.to(device)
+    pbar.update(1)
+
+    pbar.set_postfix_str(steps[4])
+    model.gps_gallery = model.gps_gallery.to(device)
+    pbar.update(1)
+
+    pbar.set_postfix_str("Done")
+    pbar.close()
 
     print(f"GeoTX model loaded on {device} (queue_size={queue_size}, "
           f"lora_r={lora_cfg.get('r', 4)}, lora_alpha={lora_cfg.get('alpha', 8)})")
@@ -74,6 +103,8 @@ def _infer_queue_size(checkpoint: dict) -> int:
 
 def load_image(image_path: str | Path, device: str = "cpu") -> torch.Tensor:
     """Load and preprocess a single image for the model."""
+    from geoclip.train.dataloader import img_val_transform  # lazy import
+
     image = Image.open(image_path).convert("RGB")
     transform = img_val_transform()
     return transform(image).unsqueeze(0).to(device)

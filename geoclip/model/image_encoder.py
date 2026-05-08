@@ -2,16 +2,21 @@ import torch
 import torch.nn as nn
 from PIL import Image
 from torchvision import transforms
-from transformers import CLIPImageProcessor, CLIPModel
+from transformers import CLIPConfig, CLIPImageProcessor, CLIPModel
 from peft import LoraConfig, get_peft_model
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module='huggingface_hub.*')
 
 class ImageEncoder(nn.Module):
-    def __init__(self, use_lora=False, lora_r=8, lora_alpha=16, lora_dropout=0.05):
+    def __init__(self, use_lora=False, lora_r=8, lora_alpha=16, lora_dropout=0.05,
+                 from_pretrained=True):
         super(ImageEncoder, self).__init__()
-        self.CLIP = CLIPModel.from_pretrained("openai/clip-vit-large-patch14")
+        if from_pretrained:
+            self.CLIP = CLIPModel.from_pretrained("openai/clip-vit-large-patch14")
+        else:
+            config = CLIPConfig.from_pretrained("openai/clip-vit-large-patch14")
+            self.CLIP = CLIPModel(config)
         self.image_processor = self._load_image_processor()
         self.mlp = nn.Sequential(nn.Linear(768, 768),
                                  nn.ReLU(),
@@ -69,6 +74,13 @@ class ImageEncoder(nn.Module):
         return x
 
     def forward(self, x):
+        # Auto-resize images that aren't 224x224 (safety net for evaluation)
+        if isinstance(x, Image.Image):
+            x = self.preprocess_image(x)
+        elif x.shape[-2] != 224 or x.shape[-1] != 224:
+            x = torch.nn.functional.interpolate(
+                x, size=(224, 224), mode='bilinear', align_corners=False,
+            )
         x = self.CLIP.get_image_features(pixel_values=x)
         # HuggingFace CLIP returns a tuple or dict, we need the tensor
         if hasattr(x, 'pooler_output'):

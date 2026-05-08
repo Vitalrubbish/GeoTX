@@ -81,8 +81,10 @@ class GeoCLIP(nn.Module):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.image_encoder = ImageEncoder(use_lora=use_lora, lora_r=lora_r,
-                                          lora_alpha=lora_alpha, lora_dropout=lora_dropout)
-        self.location_encoder = LocationEncoder(use_sigma_selector=use_sigma_selector)
+                                          lora_alpha=lora_alpha, lora_dropout=lora_dropout,
+                                          from_pretrained=from_pretrained)
+        self.location_encoder = LocationEncoder(use_sigma_selector=use_sigma_selector,
+                                                from_pretrained=from_pretrained)
         self.use_sigma_selector = use_sigma_selector
         self.use_lora = use_lora
 
