@@ -14,3 +14,4 @@ __pycache__
 scripts/convert_streetview_pano_dataset.py
 scripts/sample_streetview_subset.py
 .vscode
+minipaper
