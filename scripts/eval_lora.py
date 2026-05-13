@@ -131,6 +131,8 @@ def main() -> int:
 
     queue_size = infer_queue_size_from_checkpoint(checkpoint_data)
 
+    selector_variant = checkpoint_data.get("selector_variant", None)
+
     model = GeoCLIP(
         from_pretrained=True,
         queue_size=queue_size,
@@ -139,6 +141,7 @@ def main() -> int:
         lora_r=lora_config.get("r", 8),
         lora_alpha=lora_config.get("alpha", 16),
         lora_dropout=lora_config.get("dropout", 0.05),
+        selector_variant=selector_variant,
     ).to(device)
     model.gps_gallery = model.gps_gallery.to(device)
 

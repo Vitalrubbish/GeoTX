@@ -29,15 +29,21 @@ STREETVIEW_IMAGES = _project_root / "data" / "streetview_pano" / "images"
 # Best checkpoints from full training runs
 LORA_CKPT = _project_root / "outputs" / "lora" / "full_20260430T061933Z" / "lora_best.pth"
 SIGMA_CKPT = _project_root / "outputs" / "sigma_selector" / "full_20260427T122125Z" / "selector_best.pth"
-NEG_SAMPLING_CKPT = _project_root / "outputs" / "negative_sampling" / "full_threshold_20260506T053749Z" / "neg_sampling_best.pth"
+NEG_SAMPLING_CKPT = _project_root / "outputs" / "negative_sampling" / "full_threshold_20260512T162740Z" / "neg_sampling_best.pth"
 
 
-def load_geotx_model(device: str | None = None):
+def load_geotx_model(device: str | None = None, selector_variant: str | None = None):
     """Load GeoTX model with LoRA + SigmaSelector + Negative Sampling weights.
 
     Uses the negative-sampling checkpoint (which includes LoRA + SigmaSelector
     weights from prior training stages). Skips HuggingFace CLIP download by
     passing ``from_pretrained=False`` — all weights come from the checkpoint.
+
+    Args:
+        device: Device to load model on. Auto-detected if None.
+        selector_variant: SigmaSelector variant: None (GPS-only, default) or
+            "v0.1" (image-conditioned). The checkpoint must contain weights
+            matching this variant.
     """
     from geoclip import GeoCLIP  # lazy import — transformers is heavy
 
@@ -57,6 +63,10 @@ def load_geotx_model(device: str | None = None):
     checkpoint = torch.load(NEG_SAMPLING_CKPT, map_location="cpu")
     queue_size = _infer_queue_size(checkpoint)
     lora_cfg = checkpoint.get("lora_config", {})
+    # Auto-detect selector_variant from checkpoint if not explicitly provided
+    ckpt_variant = checkpoint.get("selector_variant", None)
+    if selector_variant is None and ckpt_variant is not None:
+        selector_variant = ckpt_variant
     pbar.update(1)
 
     pbar.set_postfix_str(steps[1])
@@ -68,6 +78,7 @@ def load_geotx_model(device: str | None = None):
         lora_r=lora_cfg.get("r", 4),
         lora_alpha=lora_cfg.get("alpha", 8),
         lora_dropout=lora_cfg.get("dropout", 0.05),
+        selector_variant=selector_variant,
     )
     pbar.update(1)
 
@@ -88,8 +99,9 @@ def load_geotx_model(device: str | None = None):
     pbar.set_postfix_str("Done")
     pbar.close()
 
+    variant_str = f", selector={selector_variant}" if selector_variant else ""
     print(f"GeoTX model loaded on {device} (queue_size={queue_size}, "
-          f"lora_r={lora_cfg.get('r', 4)}, lora_alpha={lora_cfg.get('alpha', 8)})")
+          f"lora_r={lora_cfg.get('r', 4)}, lora_alpha={lora_cfg.get('alpha', 8)}{variant_str})")
     return model
 
 

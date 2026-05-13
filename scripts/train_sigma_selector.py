@@ -37,6 +37,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also unfreeze each LocationEncoderCapsule head (final linear layer)",
     )
+    parser.add_argument("--selector-variant", type=str, default=None,
+                        choices=[None, "v0.1"],
+                        help="SigmaSelector variant: None (GPS-only) or v0.1 (image-conditioned)")
     return parser.parse_args()
 
 
@@ -237,7 +240,8 @@ def main() -> int:
         collate_fn=collate_image_gps,
     )
 
-    model = GeoCLIP(from_pretrained=True, queue_size=args.queue_size, use_sigma_selector=True).to(device)
+    model = GeoCLIP(from_pretrained=True, queue_size=args.queue_size, use_sigma_selector=True,
+                    selector_variant=args.selector_variant).to(device)
     model.gps_gallery = model.gps_gallery.to(device)
 
     trainable_params = freeze_for_sigma_training(
@@ -265,6 +269,7 @@ def main() -> int:
     print(f"Val CSV: {val_csv} ({len(val_dataset)} samples)")
     print(f"Run dir: {run_dir}")
     print(f"Unfreeze capsule head: {args.unfreeze_capsule_head}")
+    print(f"SigmaSelector variant: {args.selector_variant or 'GPS-only'}")
     trainable_param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Trainable parameters: {trainable_param_count}")
 
@@ -285,6 +290,7 @@ def main() -> int:
                 "val_loss": float(val_loss),
                 "selector_state_dict": model.location_encoder.sigma_selector.state_dict(),
                 "location_encoder_state_dict": model.location_encoder.state_dict(),
+                "selector_variant": args.selector_variant,
             },
             latest_ckpt,
         )
@@ -299,6 +305,7 @@ def main() -> int:
                     "val_loss": float(val_loss),
                     "selector_state_dict": model.location_encoder.sigma_selector.state_dict(),
                     "location_encoder_state_dict": model.location_encoder.state_dict(),
+                    "selector_variant": args.selector_variant,
                 },
                 best_ckpt,
             )
@@ -320,6 +327,7 @@ def main() -> int:
         "weight_decay": args.weight_decay,
         "queue_size": args.queue_size,
         "unfreeze_capsule_head": args.unfreeze_capsule_head,
+        "selector_variant": args.selector_variant,
         "trainable_param_count": trainable_param_count,
         "train_losses": train_losses,
         "val_losses": val_losses,

@@ -12,7 +12,7 @@ Street-view images present a much harder problem: repetitive building facades, g
 
 | Version | Components | Key Innovation |
 |---------|-----------|----------------|
-| **GeoTX v0.1** | SigmaSelector + unfrozen capsule heads | Learnable location-conditioned branch fusion |
+| **GeoTX v0.1** | SigmaSelector + unfrozen capsule heads | Learnable image-conditioned branch fusion |
 | **GeoTX v0.2** | v0.1 + LoRA on CLIP ViT + image MLP | Domain-adaptive visual features via low-rank adaptation |
 | **GeoTX v0.3** | v0.2 + Optimized Negative Sampling | Geography-aware contrastive loss |
 
@@ -41,7 +41,7 @@ graph TB
         RFF0["LocEnc0<br/>RFF σ=1"]
         RFF1["LocEnc1<br/>RFF σ=16"]
         RFF2["LocEnc2<br/>RFF σ=256"]
-        SS["SigmaSelector<br/>GPS → weights"]
+        SS["SigmaSelector<br/>Image + GPS → weights"]
         FUSION["Weighted Sum<br/>Σ w_i · f_i"]
 
         GPS --> EE
@@ -49,6 +49,7 @@ graph TB
         EE --> RFF1
         EE --> RFF2
         EE --> SS
+        MLP --> SS
         RFF0 --> FUSION
         RFF1 --> FUSION
         RFF2 --> FUSION
@@ -90,7 +91,7 @@ graph LR
         GPS2["(lat, lon)"] --> EE2["EE(x, y)"]
     end
 
-    subgraph Branch0 ["Branch 0: σ=1 (Fine)"]
+    subgraph Branch0 ["Branch 0: σ=1 (Coarse)"]
         EE2 --> R0["GaussianEncoding<br/>size=256"] --> C0["Capsule<br/>512→1024→1024→1024"] --> H0["Head<br/>1024→512"]
     end
 
@@ -98,12 +99,13 @@ graph LR
         EE2 --> R1["GaussianEncoding<br/>size=256"] --> C1["Capsule<br/>512→1024→1024→1024"] --> H1["Head<br/>1024→512"]
     end
 
-    subgraph Branch2 ["Branch 2: σ=256 (Coarse)"]
+    subgraph Branch2 ["Branch 2: σ=256 (Fine)"]
         EE2 --> R2["GaussianEncoding<br/>size=256"] --> C2["Capsule<br/>512→1024→1024→1024"] --> H2["Head<br/>1024→512"]
     end
 
     subgraph SigmaSelector ["SigmaSelector"]
-        EE2 --> SS2["Linear(2→64)<br/>ReLU<br/>Linear(64→3)<br/>Softmax"] --> W["w₀, w₁, w₂"]
+        IMG_FEAT["Image Features<br/>(512-dim)"] --> SS2
+        EE2 --> SS2["Linear(514→128)<br/>ReLU<br/>Linear(128→64)<br/>ReLU<br/>Linear(64→3)<br/>Softmax"] --> W["w₀, w₁, w₂"]
     end
 
     subgraph Fusion ["Fusion"]
@@ -118,7 +120,7 @@ graph LR
     style W fill:#3498db,color:#fff
 ```
 
-**Key insight:** The original GeoCLIP sums the three branch outputs equally. SigmaSelector replaces this with a learnable, GPS-conditioned weighted sum, letting the model learn which spatial scale matters most for each geographic region.
+**Key insight:** The original GeoCLIP sums the three branch outputs equally. SigmaSelector replaces this with a learnable, image-conditioned weighted sum — each (image, GPS) pair gets its own routing weights, so an urban photo and a rural photo at the same location route differently through the spatial-frequency branches.
 
 ### Three-Stage Optimization Evolution
 

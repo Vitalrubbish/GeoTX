@@ -21,7 +21,7 @@ The model currently lacks sensitivity to domain-specific street-view features—
 **A. Trainable Parameters (requires_grad = True):**
 1.  **LoRA Adapters**: The newly injected $A$ and $B$ matrices in the targeted ViT layers.
 2.  **Image Projection Head**: The `self.mlp` in `ImageEncoder` (768 $\rightarrow$ 768 $\rightarrow$ 512).
-3.  **SigmaSelector**: The coordinate-conditioned attention module.
+3.  **SigmaSelector**: The image-conditioned attention module (takes image features + GPS, produces per-pair routing weights).
 4.  **LocationEncoder Tail**: The last layer of the `LocationEncoderCapsule`.
 
 **B. Frozen Weights:**
@@ -42,7 +42,7 @@ Evaluation will be based on the **Great-Circle Distance** between predictions an
 *   **Median Error (km)**: The median distance error across the test set.
 
 ### 3.2 Baseline Comparison
-*   **Baseline**: SigmaSelector + Unfrozen last layer of LocationEncoder.
+*   **Baseline**: Image-conditioned SigmaSelector + Unfrozen last layer of LocationEncoder.
 *   **Target**: The LoRA-enhanced model is expected to achieve a significant improvement in fine-grained metrics (**Recall@1km** and **Recall@25km**), indicating that the model has effectively learned domain-specific street-view cues.
 
 **NOTICE**: Baseline checkpoints (e.g., `baseline_v1.pth`) must be strictly version-controlled to ensure a rigorous comparison.

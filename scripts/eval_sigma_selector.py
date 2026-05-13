@@ -71,6 +71,16 @@ def default_output_json(dataset: str, use_sigma_selector: bool) -> Path:
     return Path(f"data/{dataset}/{suffix}_eval.json")
 
 
+def detect_selector_variant_from_checkpoint(checkpoint_path: Path) -> str | None:
+    """Read selector_variant from a training checkpoint if present."""
+    if not checkpoint_path.exists():
+        return None
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    if isinstance(payload, dict):
+        return payload.get("selector_variant", None)
+    return None
+
+
 def load_selector_checkpoint_if_needed(model: GeoCLIP, checkpoint_path: Path | None) -> None:
     if checkpoint_path is None:
         return
@@ -117,7 +127,15 @@ def main() -> int:
         collate_fn=collate_image_gps,
     )
 
-    model = GeoCLIP(from_pretrained=True, use_sigma_selector=args.use_sigma_selector).to(device)
+    selector_variant = None
+    if args.use_sigma_selector and args.selector_checkpoint is not None:
+        selector_variant = detect_selector_variant_from_checkpoint(args.selector_checkpoint)
+
+    model = GeoCLIP(
+        from_pretrained=True,
+        use_sigma_selector=args.use_sigma_selector,
+        selector_variant=selector_variant,
+    ).to(device)
     model.gps_gallery = model.gps_gallery.to(device)
 
     if args.use_sigma_selector:

@@ -2,7 +2,7 @@
 
 The development and testing documents are in `docs/dev`. Reproduction instructions are in `docs/dev/test.md`.
 
-### SigmaSelector (GeoTX v0.1)
+### SigmaSelector (Core component, all GeoTX versions)
 
 #### Motivation
 
@@ -10,20 +10,22 @@ The original `LocationEncoder` in GeoCLIP uses three RFF branches with $\sigma$ 
 
 #### Implementation
 
-`SigmaSelector` is a lightweight neural network that predicts branch weights from GPS coordinates:
+`SigmaSelector` is a lightweight neural network that predicts per-pair branch weights from both image features and GPS coordinates:
 
 ```
-Input:  Equal-Earth-projected GPS (B, 2)
+Input:  [Image Features (N, 512) | Equal-Earth-projected GPS (M, 2)]  →  (N, M, 514)
         ↓
-Linear(2, 64) → ReLU → Linear(64, 3) → Softmax(dim=-1)
+Linear(514, 128) → ReLU → Linear(128, 64) → ReLU → Linear(64, 3) → Softmax(dim=-1)
         ↓
-Output: Branch weights (B, 3), row-wise sum = 1
+Output: Branch weights (N, M, 3), each row sums to 1
 ```
+
+This image-conditioned design means two different images at the same GPS coordinate get different routing weights — an urban street photo routes differently than a rural landscape.
 
 The weighted fusion replaces equal-sum:
 
 $$
-f_{loc} = \sum w_i(location) × f_i(location) \;\;\text{where}\; w_i \; \text{sums to}\; 1
+f_{loc} = \sum w_i(image, location) × f_i(location) \;\;\text{where}\; w_i \;\text{sums to}\; 1
 $$
 
 **Initialization:** The final linear layer is zero-initialized (both weight and bias), so before training the Softmax outputs uniform weights `[1/3, 1/3, 1/3]` — exactly matching the baseline behavior.
@@ -31,8 +33,9 @@ $$
 **Training strategy:** Only `SigmaSelector` parameters are trainable; all other parameters (ImageEncoder, LocationEncoder capsule backbones, logit_scale) are frozen. Optionally, the `--unfreeze-capsule-head` flag unfreezes each branch's final linear layer (`LocationEncoderCapsule.head`) for additional adaptation.
 
 **Key source files:**
-- `geoclip/model/location_encoder.py:45-60` — `SigmaSelector` class
-- `geoclip/model/location_encoder.py:82-97` — Weighted fusion in `LocationEncoder.forward()`
+- `geoclip/model/location_encoder.py:66-107` — `ImageConditionedSigmaSelector` class (the SigmaSelector used in all GeoTX versions)
+- `geoclip/model/location_encoder.py:46-63` — `SigmaSelector` class (GPS-only ablation variant)
+- `geoclip/model/location_encoder.py:159-182` — Weighted fusion in `LocationEncoder.forward()`
 - `scripts/train_sigma_selector.py` — Training script
 
 ### LoRA on ImageEncoder (GeoTX v0.2)

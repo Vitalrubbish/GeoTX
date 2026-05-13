@@ -48,6 +48,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/lora"))
+    parser.add_argument("--selector-variant", type=str, default=None,
+                        choices=[None, "v0.1"],
+                        help="SigmaSelector variant: None (GPS-only) or v0.1 (image-conditioned)")
     return parser.parse_args()
 
 
@@ -276,6 +279,7 @@ def main() -> int:
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
+        selector_variant=args.selector_variant,
     ).to(device)
     model.gps_gallery = model.gps_gallery.to(device)
 
@@ -308,6 +312,7 @@ def main() -> int:
     print(f"Val CSV: {val_csv} ({len(val_dataset)} samples)")
     print(f"Run dir: {run_dir}")
     print(f"LoRA config: r={args.lora_r}, alpha={args.lora_alpha}, dropout={args.lora_dropout}")
+    print(f"SigmaSelector variant: {args.selector_variant or 'GPS-only'}")
     print(f"Trainable parameters:")
     print(f"  LoRA adapters: {lora_param_count:,}")
     print(f"  Image MLP:     {mlp_param_count:,}")
@@ -336,6 +341,7 @@ def main() -> int:
                 "alpha": args.lora_alpha,
                 "dropout": args.lora_dropout,
             },
+            "selector_variant": args.selector_variant,
         }
 
         latest_ckpt = run_dir / "lora_latest.pth"
@@ -362,6 +368,7 @@ def main() -> int:
         "lora_r": args.lora_r,
         "lora_alpha": args.lora_alpha,
         "lora_dropout": args.lora_dropout,
+        "selector_variant": args.selector_variant,
         "lora_lr": args.lora_lr,
         "location_lr": args.location_lr,
         "weight_decay": args.weight_decay,

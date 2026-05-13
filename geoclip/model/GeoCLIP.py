@@ -77,16 +77,19 @@ def negative_sample_mask(gps_all, batch_size, neg_strategy, neg_threshold=200.0,
 
 class GeoCLIP(nn.Module):
     def __init__(self, from_pretrained=True, queue_size=4096, use_sigma_selector=False,
-                 use_lora=False, lora_r=8, lora_alpha=16, lora_dropout=0.05):
+                 use_lora=False, lora_r=8, lora_alpha=16, lora_dropout=0.05,
+                 selector_variant=None):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.image_encoder = ImageEncoder(use_lora=use_lora, lora_r=lora_r,
                                           lora_alpha=lora_alpha, lora_dropout=lora_dropout,
                                           from_pretrained=from_pretrained)
         self.location_encoder = LocationEncoder(use_sigma_selector=use_sigma_selector,
-                                                from_pretrained=from_pretrained)
+                                                from_pretrained=from_pretrained,
+                                                selector_variant=selector_variant)
         self.use_sigma_selector = use_sigma_selector
         self.use_lora = use_lora
+        self.selector_variant = selector_variant
 
         self.gps_gallery = load_gps_data(os.path.join(file_dir, "gps_gallery", "coordinates_100K.csv"))
         self._initialize_gps_queue(queue_size)
@@ -140,12 +143,14 @@ class GeoCLIP(nn.Module):
     def get_gps_queue(self):
         return self.gps_queue.t()
                                              
-    def forward(self, image, location):
+    def forward(self, image, location, gallery_chunk_size=None):
         """ GeoCLIP's forward pass
 
         Args:
             image (torch.Tensor): Image tensor of shape (n, 3, 224, 224)
             location (torch.Tensor): GPS location tensor of shape (m, 2)
+            gallery_chunk_size (int | None): Chunk size for v0.1 selector to avoid OOM
+                when m is large (e.g. 100K gallery).  If None, defaults to 4096.
 
         Returns:
             logits_per_image (torch.Tensor): Logits per image of shape (n, m)
@@ -153,17 +158,39 @@ class GeoCLIP(nn.Module):
 
         # Compute Features
         image_features = self.image_encoder(image)
-        location_features = self.location_encoder(location)
         logit_scale = self.logit_scale.exp()
-        
+
         # Normalize features
         image_features = F.normalize(image_features, dim=1)
-        location_features = F.normalize(location_features, dim=1)
-        
-        # Cosine similarity (Image Features & Location Features)
-        logits_per_image = logit_scale * (image_features @ location_features.t())
 
-        return logits_per_image
+        if self.selector_variant == "v0.1":
+            return self._forward_v01(image_features, location, logit_scale, gallery_chunk_size)
+        else:
+            location_features = self.location_encoder(location, image_features=image_features)
+            location_features = F.normalize(location_features, dim=1)
+            logits_per_image = logit_scale * (image_features @ location_features.t())
+            return logits_per_image
+
+    def _forward_v01(self, image_features, location, logit_scale, gallery_chunk_size):
+        """Chunked forward for v0.1 selector to keep memory bounded when m is large."""
+        m = location.shape[0]
+        chunk_size = gallery_chunk_size or 4096
+
+        if m <= chunk_size:
+            location_features = self.location_encoder(location, image_features=image_features)
+            location_features = F.normalize(location_features, dim=2)
+            return logit_scale * torch.einsum('nd,nmd->nm', image_features, location_features)
+
+        logit_chunks = []
+        for start in range(0, m, chunk_size):
+            end = min(start + chunk_size, m)
+            loc_chunk = location[start:end]
+            loc_feat_chunk = self.location_encoder(loc_chunk, image_features=image_features)
+            loc_feat_chunk = F.normalize(loc_feat_chunk, dim=2)
+            logit_chunk = logit_scale * torch.einsum('nd,nmd->nm', image_features, loc_feat_chunk)
+            logit_chunks.append(logit_chunk)
+
+        return torch.cat(logit_chunks, dim=1)
 
     @torch.no_grad()
     def predict(self, image_path, top_k):

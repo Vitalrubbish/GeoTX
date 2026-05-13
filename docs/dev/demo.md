@@ -36,13 +36,13 @@ To intuitively interact with the model and generate compelling qualitative resul
 ---
 
 ## Demo 3: Interpretability of SigmaSelector
-**Objective:** Analyze how the semantic content of a street-view image influences the routing weights of the LocationEncoder across different $\sigma$ (frequency scales). 
+**Objective:** Analyze how the semantic content of a street-view image influences the routing weights of the LocationEncoder across different $\sigma$ (frequency scales). SigmaSelector is **image-conditioned** — it takes both image features and GPS coordinates as input, producing per-(image, GPS) routing weights.
 
-**Hypothesis:** The model assigns higher weights to large $\sigma$ (high-frequency/fine details) for dense urban scenes, and lower $\sigma$ (low-frequency/global patterns) for natural landscapes like deserts or forests.
+**Hypothesis:** The model assigns higher weights to large $\sigma$ (high-frequency/fine details) for dense urban scenes, and lower $\sigma$ (low-frequency/global patterns) for natural landscapes like deserts or forests. Two different images at the same GPS coordinate should get different sigma routing.
 
 **Workflow in Jupyter Notebook:**
 1.  **Load Curated Examples:** Load a pre-selected gallery of 8-10 highly representative images from the dataset (e.g., 4 extreme urban cities, 4 extreme natural landscapes).
-2.  **Extract Routing Weights:** Feed images into GeoTX and extract the attention weights produced by the SigmaSelector for each $\sigma$ layer.
+2.  **Extract Routing Weights:** Feed images and GPS coordinates into GeoTX and extract the per-pair attention weights produced by the image-conditioned SigmaSelector for each $\sigma$ layer.
 3.  **Side-by-Side Visualization:** For each example, plot:
     *   *(Left)* The input street-view image.
     *   *(Right)* A Bar Chart showing the weight distribution across different $\sigma$ values, clearly demonstrating the model's adaptive scale selection based on visual content.
