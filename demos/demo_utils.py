@@ -26,10 +26,8 @@ GPS_GALLERY_CSV = _project_root / "geoclip" / "model" / "gps_gallery" / "coordin
 STREETVIEW_CSV = _project_root / "data" / "streetview_pano" / "all_subset.csv"
 STREETVIEW_IMAGES = _project_root / "data" / "streetview_pano" / "images"
 
-# Best checkpoints from full training runs
-LORA_CKPT = _project_root / "outputs" / "lora" / "full_20260430T061933Z" / "lora_best.pth"
-SIGMA_CKPT = _project_root / "outputs" / "sigma_selector" / "full_20260427T122125Z" / "selector_best.pth"
-NEG_SAMPLING_CKPT = _project_root / "outputs" / "negative_sampling" / "full_threshold_20260512T162740Z" / "neg_sampling_best.pth"
+# Best checkpoint for reproduction
+NEG_SAMPLING_CKPT = WEIGHTS_DIR / "neg_sampling_best.pth"
 
 
 def load_geotx_model(device: str | None = None, selector_variant: str | None = None):
@@ -71,7 +69,7 @@ def load_geotx_model(device: str | None = None, selector_variant: str | None = N
 
     pbar.set_postfix_str(steps[1])
     model = GeoCLIP(
-        from_pretrained=False,
+        from_pretrained=True,
         queue_size=queue_size,
         use_sigma_selector=True,
         use_lora=True,

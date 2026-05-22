@@ -92,32 +92,17 @@ python scripts/eval_sigma_selector.py \
 Evaluates only the SigmaSelector weights. The CLIP backbone, image MLP, and capsule bodies are frozen (as trained). Use the checkpoint from `train_sigma_selector.py`.
 
 ```bash
-# GeoTX (image-conditioned, auto-detected from checkpoint)
 python scripts/eval_sigma_selector.py \
     --dataset streetview_pano \
     --use-sigma-selector true \
-    --selector-checkpoint outputs/sigma_selector/<run>/sigma_selector_best.pth
-
-# Ablation: GPS-only
-python scripts/eval_sigma_selector.py \
-    --dataset streetview_pano \
-    --use-sigma-selector true \
-    --selector-checkpoint outputs/sigma_selector/<run>/sigma_selector_best.pth
+    --selector-checkpoint outputs/sigma_selector/<run>/selector_best.pth
 ```
-
-Optionally add `--output-json data/streetview_pano/custom_name.json` to name the output.
 
 ### 3. SigmaSelector + LoRA (Stage 1 Checkpoint)
 
 Evaluates LoRA adapters + image MLP + SigmaSelector + capsule heads together. Use the checkpoint from `train_lora.py`.
 
 ```bash
-# GeoTX (image-conditioned, auto-detected from checkpoint)
-python scripts/eval_lora.py \
-    --dataset streetview_pano \
-    --checkpoint outputs/lora/<run>/lora_best.pth
-
-# Ablation: GPS-only
 python scripts/eval_lora.py \
     --dataset streetview_pano \
     --checkpoint outputs/lora/<run>/lora_best.pth
@@ -125,18 +110,12 @@ python scripts/eval_lora.py \
 
 ### 4. Full Model (Stage 3 Checkpoint)
 
-Evaluates the fully-trained model after negative sampling. All components (LoRA + MLP + SigmaSelector + capsule heads) trained with geographic negative masking. Use the checkpoint from `train_negative_sampling.py`.
+Evaluates the fully-trained model after negative sampling. All components (LoRA + MLP + SigmaSelector + capsule heads) trained with geographic negative masking. The final reproduction checkpoint is distributed at `geoclip/model/weights/neg_sampling_best.pth`.
 
 ```bash
-# GeoTX (image-conditioned, auto-detected from checkpoint)
 python scripts/eval_lora.py \
     --dataset streetview_pano \
-    --checkpoint outputs/negative_sampling/<run>/neg_sampling_best.pth
-
-# Ablation: GPS-only
-python scripts/eval_lora.py \
-    --dataset streetview_pano \
-    --checkpoint outputs/negative_sampling/<run>/neg_sampling_best.pth
+    --checkpoint geoclip/model/weights/neg_sampling_best.pth
 ```
 
 ### Metrics
