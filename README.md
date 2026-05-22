@@ -60,7 +60,7 @@ graph TB
         I_FEAT["Image Features<br/>(B, 512)"]
         L_FEAT["Location Features<br/>(B, 512)"]
         SIM["Cosine Similarity<br/>× logit_scale"]
-        QUEUE["GPS Queue<br/>4096 stored embeddings"]
+        QUEUE["GPS Coord. Queue<br/>2048 stored coordinates"]
         MASK["Negative Sample Mask<br/>Exclude close negatives"]
         LOSS["Cross-Entropy Loss"]
 

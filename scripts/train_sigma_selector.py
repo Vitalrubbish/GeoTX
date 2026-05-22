@@ -40,6 +40,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selector-variant", type=str, default=None,
                         choices=[None, "v0.1"],
                         help="SigmaSelector variant: None (GPS-only) or v0.1 (image-conditioned)")
+    parser.add_argument("--eval-after-train", action="store_true",
+                        help="Run test-set evaluation after training completes")
+    parser.add_argument("--test-csv", type=Path, default=None,
+                        help="Test CSV for --eval-after-train (default: auto-detect)")
+    parser.add_argument("--patience", type=int, default=3,
+                        help="Early stopping: stop if val loss rises for N consecutive epochs")
     return parser.parse_args()
 
 
@@ -199,6 +205,46 @@ def maybe_plot_curves(output_dir: Path, train_losses: list[float], val_losses: l
     return fig_path
 
 
+def _run_post_train_eval(best_ckpt, test_csv, image_dir, batch_size, num_workers,
+                         device, output_dir, selector_variant=None):
+    """Run test-set evaluation after training and log results."""
+    from geoclip.train.eval import eval_images
+
+    test_csv = test_csv or Path("data/streetview_pano/test_subset.csv")
+    if not Path(test_csv).exists():
+        print(f"Eval-after-train: test CSV not found ({test_csv}), skipping evaluation.")
+        return
+
+    test_dataset = GeoDataLoader(str(test_csv), str(image_dir), transform=img_val_transform())
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(), collate_fn=collate_image_gps,
+    )
+
+    # Reload model from best checkpoint: start from pretrained weights, then
+    # load the fine-tuned location encoder (capsules + SigmaSelector).
+    model = GeoCLIP(from_pretrained=True, queue_size=2048,
+                    use_sigma_selector=True, selector_variant=selector_variant).to(device)
+    model.gps_gallery = model.gps_gallery.to(device)
+    ckpt = torch.load(best_ckpt, map_location=device)
+    model.location_encoder.load_state_dict(ckpt["location_encoder_state_dict"], strict=False)
+    model.eval()
+
+    metrics = eval_images(test_loader, model, device=device)
+    eval_path = output_dir / "eval_after_train.json"
+    eval_path.write_text(json.dumps({
+        "best_checkpoint": str(best_ckpt),
+        "test_csv": str(test_csv),
+        "test_samples": len(test_dataset),
+        "metrics": {k: float(v) for k, v in metrics.items()},
+    }, indent=2), encoding="utf-8")
+
+    print(f"\nPost-train evaluation ({len(test_dataset)} test samples):")
+    for k, v in metrics.items():
+        print(f"  {k}: {v:.4f}")
+    print(f"Saved eval: {eval_path}")
+
+
 def main() -> int:
     args = parse_args()
     set_seed(args.seed)
@@ -256,11 +302,13 @@ def main() -> int:
     )
     criterion = nn.CrossEntropyLoss()
 
-    run_name = f"{args.mode}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    run_name = f"{args.mode}_seed{args.seed}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     run_dir = args.output_dir / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
     best_val_loss = float("inf")
+    no_improve_count = 0
+    prev_val_loss = float("inf")
     train_losses: list[float] = []
     val_losses: list[float] = []
 
@@ -310,6 +358,18 @@ def main() -> int:
                 best_ckpt,
             )
 
+        # Early stopping
+        if val_loss > prev_val_loss:
+            no_improve_count += 1
+        else:
+            no_improve_count = 0
+        prev_val_loss = val_loss
+
+        if no_improve_count >= args.patience:
+            print(f"Early stopping at epoch {epoch} "
+                  f"(val_loss rose {no_improve_count} consecutive times)")
+            break
+
     fig_path = maybe_plot_curves(run_dir, train_losses, val_losses)
 
     log_payload = {
@@ -347,6 +407,18 @@ def main() -> int:
     print(f"Saved latest checkpoint: {run_dir / 'selector_latest.pth'}")
     if fig_path is not None:
         print(f"Saved loss curve: {fig_path}")
+
+    if args.eval_after_train:
+        _run_post_train_eval(
+            best_ckpt=run_dir / "selector_best.pth",
+            test_csv=args.test_csv,
+            image_dir=args.image_dir,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            device=device,
+            output_dir=run_dir,
+            selector_variant=args.selector_variant,
+        )
 
     return 0
 

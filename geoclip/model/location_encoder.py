@@ -78,6 +78,7 @@ class ImageConditionedSigmaSelector(nn.Module):
         for h in hidden_dims:
             layers.append(nn.Linear(in_dim, h))
             layers.append(nn.ReLU())
+            layers.append(nn.Dropout(0.2))
             in_dim = h
         layers.append(nn.Linear(in_dim, num_sigmas))
         self.mlp = nn.Sequential(*layers)
