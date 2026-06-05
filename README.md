@@ -60,7 +60,7 @@ graph TB
         I_FEAT["Image Features<br/>(B, 512)"]
         L_FEAT["Location Features<br/>(B, 512)"]
         SIM["Cosine Similarity<br/>× logit_scale"]
-        QUEUE["GPS Coord. Queue<br/>2048 stored coordinates"]
+        QUEUE["GPS Coord. Queue<br/>4096 stored coordinates"]
         MASK["Negative Sample Mask<br/>Exclude close negatives"]
         LOSS["Cross-Entropy Loss"]
 
@@ -169,6 +169,33 @@ graph LR
 
 See `docs/dev/test.md` for the complete training and evaluation runbook for all three versions.
 
+## Demos
+
+Four Jupyter notebooks in `demos/` demonstrate key aspects of GeoTX:
+
+| Demo | Notebook | Description |
+|------|----------|-------------|
+| **Demo 1** | `demo1_interactive_prediction.ipynb` | **Interactive geolocation prediction.** Upload a street-view image through a file-upload widget and the model predicts its geographic location in real time. Outputs a world heatmap showing the probability distribution over 100K candidate locations, with the top-1 prediction highlighted. |
+| **Demo 2** | `demo2_training_data_distribution.ipynb` | **Spatial distribution of training data.** Visualizes the geographic coverage of the 11K-image `streetview_pano` dataset using 2D kernel density estimation (KDE). Breaks down sample counts by region (Europe, US, Southeast Asia, etc.) to contextualize model performance biases. Supports Cartopy for high-quality map projections. |
+| **Demo 3** | `demo3_sigma_selector_interpretability.ipynb` | **SigmaSelector routing interpretability.** Extracts the three-branch routing weights (σ=1, 16, 256) for curated urban vs. natural images and compares their distributions. Reveals whether the model routes different scene types through different spatial-frequency encodings, with side-by-side image + weight-bar visualizations. |
+| **Demo 4** | `demo4_granularity_thresholds.ipynb` | **Prediction accuracy at different geographic scales.** Evaluates the model on 300 test images and categorizes predictions by error magnitude (< 25 km, < 200 km, < 750 km, > 2500 km). For each category, shows the input image alongside a zoomed comparison map with ground truth, prediction, and error distance annotated. Includes aggregate error distribution and cumulative accuracy curves. |
+
+All demos share common utilities in `demos/demo_utils.py` (model loading, image preprocessing, GPS gallery loading, map plotting).
+
+### Running the Demos
+
+```bash
+# Install dependencies
+pip install jupyter torch torchvision transformers peft pandas numpy matplotlib pillow geopy tqdm scipy
+
+# Optional: high-quality maps
+pip install cartopy
+
+# Launch Jupyter
+cd demos
+jupyter notebook
+```
+
 ## Project Structure
 
 ```
@@ -179,7 +206,9 @@ geo-clip/
 │   │   ├── image_encoder.py     # CLIP ViT + LoRA + MLP head
 │   │   ├── location_encoder.py  # 3-branch RFF + SigmaSelector weighted fusion
 │   │   ├── misc.py              # GPS data loading utilities
-│   │   └── rff/                 # Random Fourier Features (Gaussian encoding)
+│   │   ├── rff/                 # Random Fourier Features (Gaussian encoding)
+│   │   ├── gps_gallery/         # Pre-computed GPS candidate grid (100K points)
+│   │   └── weights/             # Pre-trained model checkpoints
 │   └── train/
 │       ├── train.py             # Original GeoCLIP training loop
 │       ├── dataloader.py        # GeoDataLoader + image transforms
@@ -190,11 +219,25 @@ geo-clip/
 │   ├── train_lora.py                # Train GeoTX v0.2
 │   ├── eval_lora.py                 # Evaluate v0.2/v0.3
 │   ├── train_negative_sampling.py   # Train GeoTX v0.3
+│   ├── benchmark_inference.py       # Inference speed benchmarking
+│   ├── dataset_statistics.py        # Dataset composition statistics
+│   ├── eval_with_stats.py           # Evaluation with statistical tests
+│   ├── im2gps3k_baseline.py         # GeoCLIP baseline on Im2GPS3k
+│   ├── resplit_dataset.py           # Re-split dataset into train/val/test
 │   ├── sample_streetview_subset.py  # Feasibility subset (900/100 split)
+│   ├── sweep_neg_threshold.py       # Hyperparameter sweep for neg. threshold
 │   └── convert_streetview_pano_dataset.py
+├── demos/
+│   ├── demo_utils.py                           # Shared utilities for all demos
+│   ├── demo1_interactive_prediction.ipynb      # Upload image → get GPS prediction
+│   ├── demo2_training_data_distribution.ipynb  # KDE heatmap of data coverage
+│   ├── demo3_sigma_selector_interpretability.ipynb  # Urban vs natural routing analysis
+│   └── demo4_granularity_thresholds.ipynb      # Error analysis across geographic scales
 └── docs/
     ├── dev/              # Design specs for each optimization
     ├── geoclip/          # Original GeoCLIP docs
+    ├── plan/             # Project planning documents
+    ├── progress/         # Development progress logs
     └── reproduction/     # Im2GPS3k reproduction logs
 ```
 

@@ -1,5 +1,6 @@
 data
 outputs
+.vscode
 .claude
 .cache
 __pycache__
